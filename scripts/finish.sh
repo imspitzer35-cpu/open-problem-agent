@@ -9,8 +9,7 @@ rm -f "$d/GATE_FAIL.md" review.json
 out=$(scripts/gate.sh "$d" 2>&1) || fail "Lean gate failed:
 $out"
 
-command -v latexmk >/dev/null || sudo apt-get install -yqq latexmk texlive-latex-extra texlive-science texlive-fonts-recommended >/dev/null
-out=$(cd "$d" && latexmk -pdf -interaction=nonstopmode -halt-on-error paper.tex 2>&1) || fail "LaTeX build failed:
+out=$(scripts/tex.sh "$d" 2>&1) || fail "LaTeX build failed:
 $(printf '%s' "$out" | tail -30)"
 
 LEFT=2700 scripts/claude.sh "$(cat REVIEW_PROMPT.md)

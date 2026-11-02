@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       selftest:
-        description: "Only test Lean setup and gates (no Claude, no Zenodo)"
+        description: "Only test Lean setup, gates and LaTeX (no Claude, no Zenodo)"
         type: boolean
         default: false
 
@@ -17,19 +17,19 @@ permissions:
   contents: write
   issues: write
 
+# Secrets are scoped per step: the research agent never sees ZENODO_TOKEN or a GitHub token,
+# and the checkout keeps no push credentials, so only the Publish step can publish or push.
 jobs:
   shift:
     runs-on: ubuntu-latest
     timeout-minutes: 355
-    env:
-      CLAUDE_TOKEN_ALEX: ${{ secrets.CLAUDE_TOKEN_ALEX }}
-      CLAUDE_TOKEN_SEEL: ${{ secrets.CLAUDE_TOKEN_SEEL }}
-      CLAUDE_TOKEN_KILI: ${{ secrets.CLAUDE_TOKEN_KILI }}
-      ZENODO_TOKEN: ${{ secrets.ZENODO_TOKEN }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Lean + Mathlib cache
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
           export PATH="$HOME/.elan/bin:$PATH" && echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
@@ -41,10 +41,31 @@ jobs:
           scripts/gate.sh tests/good
           if scripts/gate.sh tests/bad-sorry; then echo "bad-sorry passed the gate"; exit 1; fi
           if scripts/gate.sh tests/bad-axiom; then echo "bad-axiom passed the gate"; exit 1; fi
+          scripts/tex.sh tests/good && ls -l tests/good/paper.pdf
           python3 scripts/publish.py --dry-run tests/good
           echo "SELFTEST OK"
       - name: Research shift
         if: ${{ !inputs.selftest }}
+        env:
+          CLAUDE_TOKEN_ALEX: ${{ secrets.CLAUDE_TOKEN_ALEX }}
+          CLAUDE_TOKEN_SEEL: ${{ secrets.CLAUDE_TOKEN_SEEL }}
+          CLAUDE_TOKEN_KILI: ${{ secrets.CLAUDE_TOKEN_KILI }}
         run: |
           [ -n "$CLAUDE_TOKEN_ALEX$CLAUDE_TOKEN_SEEL$CLAUDE_TOKEN_KILI" ] || { echo "no Claude token secret set"; exit 1; }
           scripts/research.sh
+      - name: Publish + push
+        if: ${{ always() && !inputs.selftest }}
+        env:
+          CLAUDE_TOKEN_ALEX: ${{ secrets.CLAUDE_TOKEN_ALEX }}
+          CLAUDE_TOKEN_SEEL: ${{ secrets.CLAUDE_TOKEN_SEEL }}
+          CLAUDE_TOKEN_KILI: ${{ secrets.CLAUDE_TOKEN_KILI }}
+          ZENODO_TOKEN: ${{ secrets.ZENODO_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          scripts/save.sh "research: shift end"
+          for d in papers/*/; do
+            if [ -f "$d/READY" ] && [ ! -f "$d/PUBLISHED.json" ]; then
+              scripts/finish.sh "$d" || true
+              scripts/save.sh "publish: gate result $d"
+            fi
+          done
