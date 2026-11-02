@@ -1,0 +1,7 @@
+.lake/
+*.aux
+*.log
+*.fls
+*.fdb_latexmk
+*.out
+review.json

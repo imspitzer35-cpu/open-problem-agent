@@ -1,0 +1,50 @@
+name: research
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      selftest:
+        description: "Only test Lean setup and gates (no Claude, no Zenodo)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: research
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  shift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      CLAUDE_TOKEN_ALEX: ${{ secrets.CLAUDE_TOKEN_ALEX }}
+      CLAUDE_TOKEN_SEEL: ${{ secrets.CLAUDE_TOKEN_SEEL }}
+      CLAUDE_TOKEN_KILI: ${{ secrets.CLAUDE_TOKEN_KILI }}
+      ZENODO_TOKEN: ${{ secrets.ZENODO_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lean + Mathlib cache
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          export PATH="$HOME/.elan/bin:$PATH" && echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+          lake exe cache get
+          [ -f lake-manifest.json ] && git add lake-manifest.json && scripts/save.sh "chore: lake manifest" || true
+      - name: Selftest gates
+        if: inputs.selftest
+        run: |
+          scripts/gate.sh tests/good
+          if scripts/gate.sh tests/bad-sorry; then echo "bad-sorry passed the gate"; exit 1; fi
+          if scripts/gate.sh tests/bad-axiom; then echo "bad-axiom passed the gate"; exit 1; fi
+          python3 scripts/publish.py --dry-run tests/good
+          echo "SELFTEST OK"
+      - name: Research shift
+        if: ${{ !inputs.selftest }}
+        run: |
+          [ -n "$CLAUDE_TOKEN_ALEX$CLAUDE_TOKEN_SEEL$CLAUDE_TOKEN_KILI" ] || { echo "no Claude token secret set"; exit 1; }
+          scripts/research.sh
