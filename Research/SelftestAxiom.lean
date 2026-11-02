@@ -1,1 +1,1 @@
-theorem Selftest.ax : True := Lean.trustCompiler
+theorem Selftest.ax : (10 : Nat) < 20 := by decide +native
